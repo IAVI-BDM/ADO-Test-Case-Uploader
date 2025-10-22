@@ -455,21 +455,37 @@ def server(input, output, session):
     @render.download(filename=lambda: f"processed_test_cases_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
     def download_processed():
         """Download processed test cases as CSV"""
-        def write_csv():
-            test_cases = processed_test_cases.get()
-            
-            if test_cases is None:
-                # Return empty CSV with message
-                df = pd.DataFrame({"Message": ["No processed test cases available. Please process CSV first."]})
-                yield df.to_csv(index=False)
-                return
-            
-            # Convert test cases to flat CSV format
-            rows = []
-            
-            for tc in test_cases:
-                # If test case has no steps (standalone)
-                if not tc['steps']:
+        test_cases = processed_test_cases.get()
+        
+        if test_cases is None:
+            # Return empty CSV with message
+            df = pd.DataFrame({"Message": ["No processed test cases available. Please process CSV first."]})
+            yield df.to_csv(index=False)
+            return
+        
+        # Convert test cases to flat CSV format
+        rows = []
+        
+        for tc in test_cases:
+            # If test case has no steps (standalone)
+            if not tc['steps']:
+                rows.append({
+                    'Test Case Title': tc['title'],
+                    'Test Case Type': tc['type'],
+                    'Form Name': tc['form_name'],
+                    'Classification': tc['classification'],
+                    'Description': tc['description'],
+                    'Area Path': tc['area_path'],
+                    'Iteration Path': tc['iteration_path'],
+                    'State': tc['state'],
+                    'Total Steps': 0,
+                    'Step Number': None,
+                    'Step Action': None,
+                    'Step Expected': None
+                })
+            else:
+                # Create one row per step
+                for step in tc['steps']:
                     rows.append({
                         'Test Case Title': tc['title'],
                         'Test Case Type': tc['type'],
@@ -479,33 +495,14 @@ def server(input, output, session):
                         'Area Path': tc['area_path'],
                         'Iteration Path': tc['iteration_path'],
                         'State': tc['state'],
-                        'Total Steps': 0,
-                        'Step Number': None,
-                        'Step Action': None,
-                        'Step Expected': None
+                        'Total Steps': len(tc['steps']),
+                        'Step Number': step['step_number'],
+                        'Step Action': step['action'],
+                        'Step Expected': step['expected']
                     })
-                else:
-                    # Create one row per step
-                    for step in tc['steps']:
-                        rows.append({
-                            'Test Case Title': tc['title'],
-                            'Test Case Type': tc['type'],
-                            'Form Name': tc['form_name'],
-                            'Classification': tc['classification'],
-                            'Description': tc['description'],
-                            'Area Path': tc['area_path'],
-                            'Iteration Path': tc['iteration_path'],
-                            'State': tc['state'],
-                            'Total Steps': len(tc['steps']),
-                            'Step Number': step['step_number'],
-                            'Step Action': step['action'],
-                            'Step Expected': step['expected']
-                        })
-            
-            df = pd.DataFrame(rows)
-            yield df.to_csv(index=False)
         
-        return write_csv
+        df = pd.DataFrame(rows)
+        yield df.to_csv(index=False)
     
     # ========================================================================
     # CONNECTION VALIDATION
