@@ -272,7 +272,7 @@ def server(input, output, session):
             for _, row in form_level.iterrows():
                 test_cases.append({
                     'type': 'standalone',
-                    'title': f"Form - {form_name}",
+                    'title': f"{form_name} - Form Review",
                     'form_name': form_name,
                     'classification': 'Form Level',
                     'description': str(row.get('Custom.FieldorEditCheckText', '')),
