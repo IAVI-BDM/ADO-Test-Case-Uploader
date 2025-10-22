@@ -49,8 +49,6 @@ app_ui = ui.page_fluid(
             ui.h4("Optional Overrides"),
             ui.input_text("area_path", "Area Path", 
                          placeholder="Leave blank to use from CSV"),
-            ui.input_text("iteration_path", "Iteration Path", 
-                         placeholder="Leave blank to use from CSV"),
             
             ui.input_checkbox("dry_run", "Dry Run (Preview only)", value=False),
             ui.hr(),
@@ -132,7 +130,6 @@ app_ui = ui.page_fluid(
                     - `Custom.FieldName` (for Field Level)
                     - `Custom.EditCheckName` (for Edit Check Level)
                     - `Area Path`
-                    - `Iteration Path`
                     - `State`
                     """)
                 )
@@ -280,7 +277,6 @@ def server(input, output, session):
                     'classification': 'Form Level',
                     'description': str(row.get('Custom.FieldorEditCheckText', '')),
                     'area_path': str(row.get('Area Path', '')),
-                    'iteration_path': str(row.get('Iteration Path', '')),
                     'state': str(row.get('State', 'Design')),
                     'steps': []
                 })
@@ -307,7 +303,6 @@ def server(input, output, session):
                     'classification': 'Field Level',
                     'description': f"Field-level validation for form {form_name}. Total fields: {len(steps)}",
                     'area_path': str(first_row.get('Area Path', '')),
-                    'iteration_path': str(first_row.get('Iteration Path', '')),
                     'state': str(first_row.get('State', 'Design')),
                     'steps': steps
                 })
@@ -334,7 +329,6 @@ def server(input, output, session):
                     'classification': 'Edit Check Level',
                     'description': f"Edit check validation for form {form_name}. Total checks: {len(steps)}",
                     'area_path': str(first_row.get('Area Path', '')),
-                    'iteration_path': str(first_row.get('Iteration Path', '')),
                     'state': str(first_row.get('State', 'Design')),
                     'steps': steps
                 })
@@ -465,6 +459,7 @@ def server(input, output, session):
         
         # Convert test cases to Azure DevOps hierarchical format
         # Each test case = 1 header row + N step rows
+        # IMPORTANT: Column order must match exactly as specified
         rows = []
         
         for tc in test_cases:
@@ -473,17 +468,17 @@ def server(input, output, session):
                 'ID': '',  # Will be assigned by Azure DevOps on import
                 'Work Item Type': 'Test Case',
                 'Title': tc['title'],
-                'Test Step': '',  # Empty for header row
-                'Step Action': '',  # Empty for header row
-                'Step Expected': '',  # Empty for header row
+                'Test Step': '',
+                'Step Action': '',
+                'Step Expected': '',
+                'Custom.EditCheckName': '',
+                'Custom.FieldName': '',
+                'Custom.FormName': tc['form_name'],
+                'Custom.TestCaseClassification': tc['classification'],
+                'Custom.TestingTier': '',
                 'Area Path': tc['area_path'] if tc['area_path'] else '',
                 'Assigned To': '',
-                'State': tc['state'],
-                'Custom.TestCaseClassification': tc['classification'],
-                'Custom.FormName': tc['form_name'],
-                'Custom.FieldName': '',
-                'Custom.EditCheckName': '',
-                'Custom.TestingTier': ''
+                'State': tc['state']
             }
             rows.append(header_row)
             
@@ -496,18 +491,36 @@ def server(input, output, session):
                     'Test Step': step['step_number'],
                     'Step Action': step['action'],
                     'Step Expected': step['expected'],
+                    'Custom.EditCheckName': '',
+                    'Custom.FieldName': '',
+                    'Custom.FormName': '',
+                    'Custom.TestCaseClassification': '',
+                    'Custom.TestingTier': '',
                     'Area Path': '',
                     'Assigned To': '',
-                    'State': '',
-                    'Custom.TestCaseClassification': '',
-                    'Custom.FormName': '',
-                    'Custom.FieldName': '',
-                    'Custom.EditCheckName': '',
-                    'Custom.TestingTier': ''
+                    'State': ''
                 }
                 rows.append(step_row)
         
-        df = pd.DataFrame(rows)
+        # Create DataFrame with exact column order
+        columns_order = [
+            'ID',
+            'Work Item Type',
+            'Title',
+            'Test Step',
+            'Step Action',
+            'Step Expected',
+            'Custom.EditCheckName',
+            'Custom.FieldName',
+            'Custom.FormName',
+            'Custom.TestCaseClassification',
+            'Custom.TestingTier',
+            'Area Path',
+            'Assigned To',
+            'State'
+        ]
+        
+        df = pd.DataFrame(rows, columns=columns_order)
         yield df.to_csv(index=False)
     
     # ========================================================================
@@ -614,7 +627,6 @@ def server(input, output, session):
                 
                 # Build work item data
                 area_path = input.area_path() or tc['area_path']
-                iteration_path = input.iteration_path() or tc['iteration_path']
                 
                 work_item_data = [
                     {"op": "add", "path": "/fields/System.Title", "value": tc['title']},
@@ -624,8 +636,6 @@ def server(input, output, session):
                 
                 if area_path:
                     work_item_data.append({"op": "add", "path": "/fields/System.AreaPath", "value": area_path})
-                if iteration_path:
-                    work_item_data.append({"op": "add", "path": "/fields/System.IterationPath", "value": iteration_path})
                 
                 # Add custom fields (if they exist in your project template)
                 try:
