@@ -15,16 +15,16 @@
   },
   "files": {
     "requirements.txt": {
-      "checksum": "7ef3a5f570713dff27b127417eef885a"
+      "checksum": "53d69a2c1c1b1ce64406902a85eeb079"
     },
     ".gitignore": {
-      "checksum": "f9f8a86f37464a685b1b682ff19f64b1"
+      "checksum": "d91dabe5e07c406f884acd31d4f89075"
     },
     "README.md": {
       "checksum": "a59bc0fcd99ed6ab03c28fedc0765408"
     },
     "app.py": {
-      "checksum": "bc7d90b269c54e6f3e8fe102c4d76996"
+      "checksum": "0bea027f8eb6fffc5edae21a6569fe23"
     }
   }
 }
