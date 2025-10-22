@@ -454,7 +454,7 @@ def server(input, output, session):
     
     @render.download(filename=lambda: f"processed_test_cases_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
     def download_processed():
-        """Download processed test cases as CSV"""
+        """Download processed test cases as CSV in Azure DevOps format"""
         test_cases = processed_test_cases.get()
         
         if test_cases is None:
@@ -463,43 +463,49 @@ def server(input, output, session):
             yield df.to_csv(index=False)
             return
         
-        # Convert test cases to flat CSV format
+        # Convert test cases to Azure DevOps hierarchical format
+        # Each test case = 1 header row + N step rows
         rows = []
         
         for tc in test_cases:
-            # If test case has no steps (standalone)
-            if not tc['steps']:
-                rows.append({
-                    'Test Case Title': tc['title'],
-                    'Test Case Type': tc['type'],
-                    'Form Name': tc['form_name'],
-                    'Classification': tc['classification'],
-                    'Description': tc['description'],
-                    'Area Path': tc['area_path'],
-                    'Iteration Path': tc['iteration_path'],
-                    'State': tc['state'],
-                    'Total Steps': 0,
-                    'Step Number': None,
-                    'Step Action': None,
-                    'Step Expected': None
-                })
-            else:
-                # Create one row per step
-                for step in tc['steps']:
-                    rows.append({
-                        'Test Case Title': tc['title'],
-                        'Test Case Type': tc['type'],
-                        'Form Name': tc['form_name'],
-                        'Classification': tc['classification'],
-                        'Description': tc['description'],
-                        'Area Path': tc['area_path'],
-                        'Iteration Path': tc['iteration_path'],
-                        'State': tc['state'],
-                        'Total Steps': len(tc['steps']),
-                        'Step Number': step['step_number'],
-                        'Step Action': step['action'],
-                        'Step Expected': step['expected']
-                    })
+            # Add test case header row (metadata only, steps empty)
+            header_row = {
+                'ID': '',  # Will be assigned by Azure DevOps on import
+                'Work Item Type': 'Test Case',
+                'Title': tc['title'],
+                'Test Step': '',  # Empty for header row
+                'Step Action': '',  # Empty for header row
+                'Step Expected': '',  # Empty for header row
+                'Area Path': tc['area_path'] if tc['area_path'] else '',
+                'Assigned To': '',
+                'State': tc['state'],
+                'Custom.TestCaseClassification': tc['classification'],
+                'Custom.FormName': tc['form_name'],
+                'Custom.FieldName': '',
+                'Custom.EditCheckName': '',
+                'Custom.TestingTier': ''
+            }
+            rows.append(header_row)
+            
+            # Add step rows (only step fields filled, rest empty)
+            for step in tc['steps']:
+                step_row = {
+                    'ID': '',
+                    'Work Item Type': '',
+                    'Title': '',
+                    'Test Step': step['step_number'],
+                    'Step Action': step['action'],
+                    'Step Expected': step['expected'],
+                    'Area Path': '',
+                    'Assigned To': '',
+                    'State': '',
+                    'Custom.TestCaseClassification': '',
+                    'Custom.FormName': '',
+                    'Custom.FieldName': '',
+                    'Custom.EditCheckName': '',
+                    'Custom.TestingTier': ''
+                }
+                rows.append(step_row)
         
         df = pd.DataFrame(rows)
         yield df.to_csv(index=False)
