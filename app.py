@@ -3,7 +3,7 @@ Azure DevOps Test Case Uploader
 A Python Shiny application for processing and uploading test cases to Azure DevOps
 
 Author: Biostatistics & Data Science
-Version: 2.0.1
+Version: 2.0.2
 """
 
 from shiny import App, ui, render, reactive
@@ -454,7 +454,7 @@ def server(input, output, session):
         if test_cases is None:
             # Return empty CSV with message
             df = pd.DataFrame({"Message": ["No processed test cases available. Please process CSV first."]})
-            yield df.to_csv(index=False)
+            yield df.to_csv(index=False, na_rep='')
             return
         
         # Convert test cases to Azure DevOps hierarchical format
@@ -521,7 +521,9 @@ def server(input, output, session):
         ]
         
         df = pd.DataFrame(rows, columns=columns_order)
-        yield df.to_csv(index=False)
+        
+        # Export CSV with NaN values as blanks
+        yield df.to_csv(index=False, na_rep='')
     
     # ========================================================================
     # CONNECTION VALIDATION
