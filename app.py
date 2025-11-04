@@ -3,7 +3,7 @@ Azure DevOps Test Case Uploader
 A Python Shiny application for processing and uploading test cases to Azure DevOps
 
 Author: Biostatistics & Data Science
-Version: 2.0.4
+Version: 2.0.5
 """
 
 from shiny import App, ui, render, reactive
@@ -16,7 +16,10 @@ import re
 from datetime import datetime
 
 # Application version
-VERSION = "2.0.4"
+VERSION = "2.0.5"
+
+# Configuration
+BATCH_SIZE = 1000  # Maximum test cases per batch
 
 # ============================================================================
 # USER INTERFACE
@@ -695,114 +698,160 @@ def server(input, output, session):
         base_url = f"https://dev.azure.com/{organization}/{project}/_apis"
         headers = create_auth_header(pat_token)
         
-        results = []
         total = len(test_cases)
+        all_results = []
         
-        for idx, tc in enumerate(test_cases, 1):
-            # Update progress
+        # Split into batches if more than BATCH_SIZE
+        num_batches = (total + BATCH_SIZE - 1) // BATCH_SIZE  # Ceiling division
+        
+        if num_batches > 1:
             upload_progress_info.set({
-                'status': 'running',
-                'current': idx,
-                'total': total,
-                'message': f'Processing: {tc["title"]}'
+                'status': 'info',
+                'message': f'Large upload detected: {total} test cases will be processed in {num_batches} batches of up to {BATCH_SIZE} items each.'
             })
+            time.sleep(2)  # Give user time to see the message
+        
+        for batch_num in range(num_batches):
+            start_idx = batch_num * BATCH_SIZE
+            end_idx = min(start_idx + BATCH_SIZE, total)
+            batch_test_cases = test_cases[start_idx:end_idx]
+            batch_size = len(batch_test_cases)
             
-            try:
-                if dry_run:
-                    # Simulate upload for dry run
-                    time.sleep(0.1)
-                    results.append({
-                        'Title': tc['title'],
-                        'Status': 'Dry Run',
-                        'Work Item ID': 'N/A',
-                        'Steps': len(tc['steps']),
-                        'Timestamp': datetime.now().strftime('%H:%M:%S')
-                    })
-                    continue
+            batch_label = f"Batch {batch_num + 1}/{num_batches}" if num_batches > 1 else ""
+            
+            for idx, tc in enumerate(batch_test_cases, 1):
+                overall_idx = start_idx + idx
                 
-                # Build work item data
-                area_path = input.area_path() or tc['area_path']
+                # Update progress
+                progress_msg = f'{batch_label} - Processing {tc["title"]} ({overall_idx}/{total})' if batch_label else f'Processing: {tc["title"]} ({overall_idx}/{total})'
+                upload_progress_info.set({
+                    'status': 'running',
+                    'current': overall_idx,
+                    'total': total,
+                    'batch': batch_num + 1 if num_batches > 1 else None,
+                    'total_batches': num_batches if num_batches > 1 else None,
+                    'message': progress_msg
+                })
                 
-                work_item_data = [
-                    {"op": "add", "path": "/fields/System.Title", "value": tc['title']},
-                    {"op": "add", "path": "/fields/System.State", "value": tc['state']},
-                    {"op": "add", "path": "/fields/System.Description", "value": tc['description']}
-                ]
-                
-                if area_path:
-                    work_item_data.append({"op": "add", "path": "/fields/System.AreaPath", "value": area_path})
-                
-                # Add custom fields (if they exist in your project template)
                 try:
-                    work_item_data.append({"op": "add", "path": "/fields/Custom.TestCaseClassification", "value": tc['classification']})
-                    work_item_data.append({"op": "add", "path": "/fields/Custom.FormName", "value": tc['form_name']})
-                except:
-                    pass  # Custom fields may not exist in all projects
-                
-                # Create work item
-                create_url = f"{base_url}/wit/workitems/$Test Case?api-version=7.0"
-                response = requests.post(create_url, headers=headers, json=work_item_data, timeout=30)
-                
-                if response.status_code in [200, 201]:
-                    work_item = response.json()
-                    work_item_id = work_item['id']
+                    if dry_run:
+                        # Simulate upload for dry run
+                        time.sleep(0.05)
+                        all_results.append({
+                            'Batch': batch_num + 1 if num_batches > 1 else 'N/A',
+                            'Title': tc['title'],
+                            'Status': 'Dry Run',
+                            'Work Item ID': 'N/A',
+                            'Steps': len(tc['steps']),
+                            'Timestamp': datetime.now().strftime('%H:%M:%S')
+                        })
+                        continue
                     
-                    # Add steps if any
-                    if tc['steps']:
-                        steps_xml = '<steps id="0" last="' + str(len(tc['steps'])) + '">'
-                        for step in tc['steps']:
-                            action = escape_xml(step['action'])
-                            expected = escape_xml(step['expected'])
-                            steps_xml += f'''<step id="{step['step_number']}" type="ValidateStep">
-                                <parameterizedString isformatted="true">&lt;DIV&gt;&lt;P&gt;{action}&lt;/P&gt;&lt;/DIV&gt;</parameterizedString>
-                                <parameterizedString isformatted="true">&lt;DIV&gt;&lt;P&gt;{expected}&lt;/P&gt;&lt;/DIV&gt;</parameterizedString>
-                                <description/>
-                            </step>'''
-                        steps_xml += '</steps>'
+                    # Build work item data
+                    area_path = input.area_path() or tc['area_path']
+                    
+                    work_item_data = [
+                        {"op": "add", "path": "/fields/System.Title", "value": tc['title']},
+                        {"op": "add", "path": "/fields/System.State", "value": tc['state']},
+                        {"op": "add", "path": "/fields/System.Description", "value": tc['description']}
+                    ]
+                    
+                    if area_path:
+                        work_item_data.append({"op": "add", "path": "/fields/System.AreaPath", "value": area_path})
+                    
+                    # Add custom fields (if they exist in your project template)
+                    try:
+                        work_item_data.append({"op": "add", "path": "/fields/Custom.TestCaseClassification", "value": tc['classification']})
+                        work_item_data.append({"op": "add", "path": "/fields/Custom.FormName", "value": tc['form_name']})
+                    except:
+                        pass  # Custom fields may not exist in all projects
+                    
+                    # Create work item
+                    create_url = f"{base_url}/wit/workitems/$Test Case?api-version=7.0"
+                    response = requests.post(create_url, headers=headers, json=work_item_data, timeout=30)
+                    
+                    if response.status_code in [200, 201]:
+                        work_item = response.json()
+                        work_item_id = work_item['id']
                         
-                        update_data = [
-                            {"op": "add", "path": "/fields/Microsoft.VSTS.TCM.Steps", "value": steps_xml}
-                        ]
-                        update_url = f"{base_url}/wit/workitems/{work_item_id}?api-version=7.0"
-                        requests.patch(update_url, headers=headers, json=update_data, timeout=30)
-                    
-                    results.append({
+                        # Add steps if any
+                        if tc['steps']:
+                            steps_xml = '<steps id="0" last="' + str(len(tc['steps'])) + '">'
+                            for step in tc['steps']:
+                                action = escape_xml(step['action'])
+                                expected = escape_xml(step['expected'])
+                                steps_xml += f'''<step id="{step['step_number']}" type="ValidateStep">
+                                    <parameterizedString isformatted="true">&lt;DIV&gt;&lt;P&gt;{action}&lt;/P&gt;&lt;/DIV&gt;</parameterizedString>
+                                    <parameterizedString isformatted="true">&lt;DIV&gt;&lt;P&gt;{expected}&lt;/P&gt;&lt;/DIV&gt;</parameterizedString>
+                                    <description/>
+                                </step>'''
+                            steps_xml += '</steps>'
+                            
+                            update_data = [
+                                {"op": "add", "path": "/fields/Microsoft.VSTS.TCM.Steps", "value": steps_xml}
+                            ]
+                            update_url = f"{base_url}/wit/workitems/{work_item_id}?api-version=7.0"
+                            requests.patch(update_url, headers=headers, json=update_data, timeout=30)
+                        
+                        all_results.append({
+                            'Batch': batch_num + 1 if num_batches > 1 else 'N/A',
+                            'Title': tc['title'],
+                            'Status': 'Success',
+                            'Work Item ID': work_item_id,
+                            'Steps': len(tc['steps']),
+                            'Timestamp': datetime.now().strftime('%H:%M:%S')
+                        })
+                    else:
+                        error_msg = response.text[:100] if response.text else 'Unknown error'
+                        all_results.append({
+                            'Batch': batch_num + 1 if num_batches > 1 else 'N/A',
+                            'Title': tc['title'],
+                            'Status': f'Failed ({response.status_code})',
+                            'Work Item ID': None,
+                            'Steps': len(tc['steps']),
+                            'Timestamp': datetime.now().strftime('%H:%M:%S')
+                        })
+                        print(f"Upload failed for {tc['title']}: {error_msg}")
+                        
+                except Exception as e:
+                    all_results.append({
+                        'Batch': batch_num + 1 if num_batches > 1 else 'N/A',
                         'Title': tc['title'],
-                        'Status': 'Success',
-                        'Work Item ID': work_item_id,
-                        'Steps': len(tc['steps']),
-                        'Timestamp': datetime.now().strftime('%H:%M:%S')
-                    })
-                else:
-                    error_msg = response.text[:100] if response.text else 'Unknown error'
-                    results.append({
-                        'Title': tc['title'],
-                        'Status': f'Failed ({response.status_code})',
+                        'Status': f'Error: {str(e)[:50]}',
                         'Work Item ID': None,
                         'Steps': len(tc['steps']),
                         'Timestamp': datetime.now().strftime('%H:%M:%S')
                     })
-                    print(f"Upload failed for {tc['title']}: {error_msg}")
-                    
-            except Exception as e:
-                results.append({
-                    'Title': tc['title'],
-                    'Status': f'Error: {str(e)[:50]}',
-                    'Work Item ID': None,
-                    'Steps': len(tc['steps']),
-                    'Timestamp': datetime.now().strftime('%H:%M:%S')
-                })
-                print(f"Exception for {tc['title']}: {str(e)}")
+                    print(f"Exception for {tc['title']}: {str(e)}")
+                
+                # Rate limiting - be nice to the API
+                time.sleep(0.5)
             
-            # Rate limiting - be nice to the API
-            time.sleep(0.5)
+            # Pause between batches (if multiple batches)
+            if num_batches > 1 and batch_num < num_batches - 1:
+                upload_progress_info.set({
+                    'status': 'running',
+                    'current': end_idx,
+                    'total': total,
+                    'batch': batch_num + 1,
+                    'total_batches': num_batches,
+                    'message': f'Completed batch {batch_num + 1}/{num_batches}. Pausing before next batch...'
+                })
+                time.sleep(2)  # Brief pause between batches
         
-        upload_results_data.set(pd.DataFrame(results))
+        upload_results_data.set(pd.DataFrame(all_results))
+        
+        completion_msg = f'Upload complete! Processed {total} test cases'
+        if num_batches > 1:
+            completion_msg += f' across {num_batches} batches'
+        
         upload_progress_info.set({
             'status': 'complete',
             'current': total,
             'total': total,
-            'message': 'Upload complete!'
+            'batch': num_batches if num_batches > 1 else None,
+            'total_batches': num_batches if num_batches > 1 else None,
+            'message': completion_msg
         })
     
     # ========================================================================
@@ -825,9 +874,24 @@ def server(input, output, session):
         elements = []
         
         if progress_info:
-            if progress_info['status'] == 'running':
+            if progress_info['status'] == 'info':
+                elements.append(ui.tags.div(
+                    ui.tags.h5("ℹ️ Batch Processing", class_="text-info"),
+                    ui.tags.p(progress_info['message']),
+                    class_="info-box"
+                ))
+            elif progress_info['status'] == 'running':
                 progress_pct = (progress_info['current'] / progress_info['total']) * 100
-                elements.append(ui.tags.h5(f"Progress: {progress_info['current']}/{progress_info['total']}"))
+                
+                # Show batch info if applicable
+                if progress_info.get('batch') and progress_info.get('total_batches'):
+                    elements.append(ui.tags.h5(
+                        f"Batch {progress_info['batch']}/{progress_info['total_batches']} - " +
+                        f"Progress: {progress_info['current']}/{progress_info['total']}"
+                    ))
+                else:
+                    elements.append(ui.tags.h5(f"Progress: {progress_info['current']}/{progress_info['total']}"))
+                
                 elements.append(ui.tags.div(
                     ui.tags.div(
                         style=f"width: {progress_pct}%; height: 25px; background-color: #007bff; text-align: center; color: white; line-height: 25px;",
@@ -838,6 +902,8 @@ def server(input, output, session):
                 elements.append(ui.tags.p(f"Current: {progress_info['message']}"))
             elif progress_info['status'] == 'complete':
                 elements.append(ui.tags.h4("✅ Upload Complete!", class_="text-success"))
+                if progress_info.get('message'):
+                    elements.append(ui.tags.p(progress_info['message']))
             elif progress_info['status'] == 'error':
                 elements.append(ui.tags.h4("❌ Error", class_="text-danger"))
                 elements.append(ui.tags.p(progress_info['message']))
@@ -854,6 +920,21 @@ def server(input, output, session):
                 " ",
                 ui.tags.span(f"❌ Failed: {failed}", class_="error-badge" if failed > 0 else "")
             ))
+            
+            # Show batch breakdown if multiple batches were used
+            if 'Batch' in results_df.columns and results_df['Batch'].nunique() > 1:
+                elements.append(ui.tags.hr())
+                elements.append(ui.tags.h5("Batch Breakdown:"))
+                batch_summary = results_df.groupby('Batch').agg({
+                    'Status': lambda x: (x == 'Success').sum()
+                }).reset_index()
+                batch_summary.columns = ['Batch', 'Successful']
+                batch_summary['Total'] = results_df.groupby('Batch').size().values
+                
+                for _, row in batch_summary.iterrows():
+                    elements.append(ui.tags.p(
+                        f"Batch {row['Batch']}: {row['Successful']}/{row['Total']} successful"
+                    ))
         
         return ui.div(*elements)
     
