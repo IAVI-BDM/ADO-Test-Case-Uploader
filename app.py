@@ -3,7 +3,7 @@ Azure DevOps Test Case Uploader
 A Python Shiny application for processing and uploading test cases to Azure DevOps
 
 Author: Biostatistics & Data Science
-Version: 2.0.2
+Version: 1.1
 """
 
 from shiny import App, ui, render, reactive
@@ -13,6 +13,9 @@ import json
 import base64
 import time
 from datetime import datetime
+
+# Application version
+VERSION = "1.1"
 
 # ============================================================================
 # USER INTERFACE
@@ -29,6 +32,11 @@ app_ui = ui.page_fluid(
     ),
     
     ui.panel_title("🚀 Azure DevOps Test Case Uploader"),
+    
+    ui.div(
+        ui.tags.span(f"Version {VERSION}", style="color: #6c757d; font-size: 0.9em; margin-left: 10px;"),
+        style="margin-bottom: 15px;"
+    ),
     
     ui.layout_sidebar(
         ui.sidebar(
@@ -99,6 +107,14 @@ app_ui = ui.page_fluid(
             ),
             
             ui.nav_panel("⚙️ Settings & Help",
+                ui.card(
+                    ui.card_header("Application Info"),
+                    ui.markdown(f"""
+                    **Version:** {VERSION}  
+                    **Author:** Biostatistics & Data Science  
+                    **Purpose:** Process and upload test cases to Azure DevOps
+                    """)
+                ),
                 ui.card(
                     ui.card_header("Connection Status"),
                     ui.output_text_verbatim("connection_status")
