@@ -3,7 +3,7 @@ Azure DevOps Test Case Uploader
 A Python Shiny application for processing and uploading test cases to Azure DevOps
 
 Author: Biostatistics & Data Science
-Version: 2.0.4
+Version: 1.3
 """
 
 from shiny import App, ui, render, reactive
@@ -12,11 +12,10 @@ import requests
 import json
 import base64
 import time
-import re
 from datetime import datetime
 
 # Application version
-VERSION = "2.0.4"
+VERSION = "1.3"
 
 # ============================================================================
 # USER INTERFACE
@@ -184,25 +183,6 @@ def server(input, output, session):
             return ""
         return str(text).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;').replace("'", '&apos;')
     
-    def strip_html_tags(text):
-        """Remove HTML tags from text"""
-        if not text or pd.isna(text):
-            return ""
-        # Convert to string
-        text = str(text)
-        # Remove HTML tags using regex
-        clean_text = re.sub(r'<[^>]+>', '', text)
-        # Decode common HTML entities
-        clean_text = clean_text.replace('&nbsp;', ' ')
-        clean_text = clean_text.replace('&amp;', '&')
-        clean_text = clean_text.replace('&lt;', '<')
-        clean_text = clean_text.replace('&gt;', '>')
-        clean_text = clean_text.replace('&quot;', '"')
-        clean_text = clean_text.replace('&#39;', "'")
-        # Remove extra whitespace
-        clean_text = ' '.join(clean_text.split())
-        return clean_text.strip()
-    
     # ========================================================================
     # DATA LOADING
     # ========================================================================
@@ -333,7 +313,7 @@ def server(input, output, session):
                     'title': f"{form_name} - Form Review",
                     'form_name': form_name,
                     'classification': 'Form Level',
-                    'description': strip_html_tags(row.get('Custom.FieldorEditCheckText', '')),
+                    'description': str(row.get('Custom.FieldorEditCheckText', '')),
                     'area_path': str(row.get('Area Path', '')),
                     'state': str(row.get('State', 'Design')),
                     'steps': []
@@ -345,7 +325,7 @@ def server(input, output, session):
                 steps = []
                 for idx, row in field_level.iterrows():
                     field_name = str(row.get('Custom.FieldName', ''))
-                    field_text = strip_html_tags(row.get('Custom.FieldorEditCheckText', ''))
+                    field_text = str(row.get('Custom.FieldorEditCheckText', ''))
                     steps.append({
                         'step_number': len(steps) + 1,
                         'action': f"Test field: {field_name}",
@@ -371,7 +351,7 @@ def server(input, output, session):
                 steps = []
                 for idx, row in edit_check_level.iterrows():
                     edit_check_name = str(row.get('Custom.EditCheckName', ''))
-                    edit_check_text = strip_html_tags(row.get('Custom.FieldorEditCheckText', ''))
+                    edit_check_text = str(row.get('Custom.FieldorEditCheckText', ''))
                     steps.append({
                         'step_number': len(steps) + 1,
                         'action': f"Test edit check: {edit_check_name}",
