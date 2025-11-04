@@ -3,7 +3,7 @@ Azure DevOps Test Case Uploader
 A Python Shiny application for processing and uploading test cases to Azure DevOps
 
 Author: Biostatistics & Data Science
-Version: 1.2
+Version: 1.3
 """
 
 from shiny import App, ui, render, reactive
@@ -15,7 +15,7 @@ import time
 from datetime import datetime
 
 # Application version
-VERSION = "1.2"
+VERSION = "1.3"
 
 # ============================================================================
 # USER INTERFACE
@@ -201,13 +201,6 @@ def server(input, output, session):
             df = pd.read_csv(file_path)
             df.columns = df.columns.str.strip()
             
-            # Validate required columns
-            required_cols = ['Custom.TestCaseClassification', 'Custom.FormName']
-            missing_cols = [col for col in required_cols if col not in df.columns]
-            
-            if missing_cols:
-                print(f"Warning: Missing required columns: {missing_cols}")
-            
             uploaded_data.set(df)
             
         except Exception as e:
@@ -232,6 +225,21 @@ def server(input, output, session):
         stats = []
         stats.append(ui.tags.p(ui.tags.strong("Total Rows: "), f"{len(df):,}"))
         stats.append(ui.tags.p(ui.tags.strong("Total Columns: "), f"{len(df.columns)}"))
+        
+        # Check for required columns
+        required_cols = ['Custom.TestCaseClassification', 'Custom.FormName']
+        missing_cols = [col for col in required_cols if col not in df.columns]
+        
+        if missing_cols:
+            stats.append(ui.tags.hr())
+            stats.append(ui.tags.div(
+                ui.tags.h5("⚠️ Warning: Missing Required Columns", class_="text-danger"),
+                ui.tags.p("The following required columns are missing:"),
+                ui.tags.ul(*[ui.tags.li(col) for col in missing_cols]),
+                ui.tags.p("Processing will fail. Please check your CSV file."),
+                style="background-color: #f8d7da; padding: 10px; border-radius: 5px; color: #721c24;"
+            ))
+            return ui.div(*stats)
         
         if 'Custom.TestCaseClassification' in df.columns:
             stats.append(ui.tags.hr())
@@ -274,6 +282,19 @@ def server(input, output, session):
         """Process CSV into test case structure"""
         df = uploaded_data.get()
         if df is None:
+            processed_test_cases.set(None)
+            return
+        
+        # Validate required columns exist
+        required_cols = ['Custom.TestCaseClassification', 'Custom.FormName']
+        missing_cols = [col for col in required_cols if col not in df.columns]
+        
+        if missing_cols:
+            # Set error state
+            processed_test_cases.set({
+                'error': True,
+                'message': f"Missing required columns: {', '.join(missing_cols)}. Please check your CSV file."
+            })
             return
         
         test_cases = []
@@ -367,6 +388,20 @@ def server(input, output, session):
                          class_="text-warning")
             )
         
+        # Check for error state
+        if isinstance(test_cases, dict) and test_cases.get('error'):
+            return ui.div(
+                ui.tags.h4("❌ Processing Error", class_="text-danger"),
+                ui.tags.p(test_cases.get('message', 'Unknown error occurred')),
+                ui.tags.hr(),
+                ui.tags.p("Please ensure your CSV file contains the following required columns:"),
+                ui.tags.ul(
+                    ui.tags.li("Custom.TestCaseClassification"),
+                    ui.tags.li("Custom.FormName"),
+                    ui.tags.li("Custom.FieldorEditCheckText")
+                )
+            )
+        
         type_counts = {}
         total_steps = 0
         for tc in test_cases:
@@ -417,6 +452,12 @@ def server(input, output, session):
         test_cases = processed_test_cases.get()
         if test_cases is None:
             return ui.p("No test cases to display.")
+        
+        # Check for error state
+        if isinstance(test_cases, dict) and test_cases.get('error'):
+            return ui.div(
+                ui.tags.p("Cannot display test cases due to processing error.", class_="text-danger")
+            )
         
         display_cases = test_cases[:5]
         panels = []
@@ -471,6 +512,13 @@ def server(input, output, session):
         if test_cases is None:
             # Return empty CSV with message
             df = pd.DataFrame({"Message": ["No processed test cases available. Please process CSV first."]})
+            yield df.to_csv(index=False, na_rep='')
+            return
+        
+        # Check for error state
+        if isinstance(test_cases, dict) and test_cases.get('error'):
+            # Return CSV with error message
+            df = pd.DataFrame({"Error": [test_cases.get('message', 'Unknown error occurred')]})
             yield df.to_csv(index=False, na_rep='')
             return
         
@@ -613,6 +661,14 @@ def server(input, output, session):
             upload_progress_info.set({
                 'status': 'error',
                 'message': 'Missing required configuration. Please fill all fields.'
+            })
+            return
+        
+        # Check for error state in processed test cases
+        if isinstance(test_cases, dict) and test_cases.get('error'):
+            upload_progress_info.set({
+                'status': 'error',
+                'message': f"Cannot upload: {test_cases.get('message', 'Unknown error in test cases')}"
             })
             return
         
