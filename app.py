@@ -16,7 +16,7 @@ import re
 from datetime import datetime
 
 # Application version
-VERSION = "2.0.8"
+VERSION = "2.0.9"
 
 # Configuration
 BATCH_SIZE = 1000  # Maximum test cases per batch
@@ -521,8 +521,8 @@ def server(input, output, session):
                             # Default if tier is not specified or unknown
                             expected = f"Edit check '{edit_check_name}' functions correctly. {edit_check_text}"
                         
-                        # Action format: "Review field: EditCheckName (EditCheckText)"
-                        action = f"Review field: {edit_check_name}"
+                        # Action format: "Review Edit Check: EditCheckName (EditCheckText)"
+                        action = f"Review Edit Check: {edit_check_name}"
                         if edit_check_text:
                             action += f" ({edit_check_text})"
                         
