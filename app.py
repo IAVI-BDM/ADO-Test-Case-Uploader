@@ -16,7 +16,7 @@ import re
 from datetime import datetime
 
 # Application version
-VERSION = "2.0.7"
+VERSION = "2.0.8"
 
 # Configuration
 BATCH_SIZE = 1000  # Maximum test cases per batch
@@ -297,15 +297,35 @@ def server(input, output, session):
             # Show Testing Tier breakdown by Classification
             stats.append(ui.tags.hr())
             stats.append(ui.tags.h5("Testing Tier Distribution:"))
-            
+
             for classification in df['Custom.TestCaseClassification'].dropna().unique():
                 class_df = df[df['Custom.TestCaseClassification'] == classification]
-                tier_counts = class_df['Custom.TestingTier'].value_counts()
-                
+
+                # Count tiers including missing values
+                tier_counts = {}
+                for tier in class_df['Custom.TestingTier']:
+                    if pd.notna(tier) and str(tier).strip():
+                        tier_str = str(tier).strip()
+                        tier_counts[tier_str] = tier_counts.get(tier_str, 0) + 1
+                    else:
+                        tier_counts['Missing'] = tier_counts.get('Missing', 0) + 1
+
                 if len(tier_counts) > 0:
                     stats.append(ui.tags.p(ui.tags.strong(f"{classification}:")))
+
+                    # Display in specific order: Tier 1, Tier 2, Tier 3, Missing
+                    tier_order = ['Tier 1', 'Tier 2', 'Tier 3', 'Missing']
+                    for tier in tier_order:
+                        if tier in tier_counts:
+                            stats.append(ui.tags.p(
+                                f"  • {tier}: ",
+                                ui.tags.strong(f"{tier_counts[tier]:,}"),
+                                " items"
+                            ))
+
+                    # Display any other tiers that weren't in the predefined order
                     for tier, count in tier_counts.items():
-                        if pd.notna(tier) and str(tier).strip():
+                        if tier not in tier_order:
                             stats.append(ui.tags.p(
                                 f"  • {tier}: ",
                                 ui.tags.strong(f"{count:,}"),
