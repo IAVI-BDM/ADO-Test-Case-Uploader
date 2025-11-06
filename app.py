@@ -357,9 +357,33 @@ def server(input, output, session):
         for form_name in unique_forms:
             form_data = df[df['Custom.FormName'] == form_name]
             
-            # Process Form Level items (standalone test cases)
+# Process Form Level items (standalone test cases)
             form_level = form_data[form_data['Custom.TestCaseClassification'] == 'Form Level']
             for _, row in form_level.iterrows():
+                # Define standard Form Level test steps
+                form_level_steps = [
+                    {
+                        'step_number': 1,
+                        'action': 'Review all questions/fields on CRF against CRF specification',
+                        'expected': 'All expected fields are present on eCRF and text is accurate'
+                    },
+                    {
+                        'step_number': 2,
+                        'action': 'Review order of CRF questions',
+                        'expected': 'Order of eCRF questions is logical and accurate'
+                    },
+                    {
+                        'step_number': 3,
+                        'action': 'Review required data on each CRF',
+                        'expected': 'All required fields are indicated as such before or after save or proper queries are issued for missing data'
+                    },
+                    {
+                        'step_number': 4,
+                        'action': 'Review field dynamics against specification',
+                        'expected': 'All eCRF questions/fields are available as expected and hidden / not available as expected.'
+                    }
+                ]
+                
                 test_cases.append({
                     'type': 'standalone',
                     'title': f"{form_name} - Form Review",
@@ -369,7 +393,7 @@ def server(input, output, session):
                     'description': strip_html_tags(row.get('Custom.FieldorEditCheckText', '')),
                     'area_path': str(row.get('Area Path', '')),
                     'state': str(row.get('State', 'Design')),
-                    'steps': []
+                    'steps': form_level_steps
                 })
             
             # Process Field Level items (group by Testing Tier)
