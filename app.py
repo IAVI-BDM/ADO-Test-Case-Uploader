@@ -145,12 +145,22 @@ app_ui = ui.page_fluid(
                     - `Custom.TestCaseClassification` (Form Level, Field Level, Edit Check Level)
                     - `Custom.FormName`
                     - `Custom.FieldorEditCheckText`
+                    - `Custom.TestingTier` (Tier 1, Tier 2, or Tier 3)
                     
                     **Optional CSV Columns:**
                     - `Custom.FieldName` (for Field Level)
                     - `Custom.EditCheckName` (for Edit Check Level)
                     - `Area Path`
                     - `State`
+                    
+                    **Testing Tier Specifications:**
+                    - **Field Level - Tier 1**: Validates variable name, label, SAS label, format, length, pick lists, value choices, calculation
+                    - **Field Level - Tier 2**: Validates variable format, length, pick lists, value choices, calculation
+                    - **Field Level - Tier 3**: Validates variable format, length, calculation
+                    - **Edit Check Level - Tier 1**: Tests positive/negative cases, range checks, query text accuracy, and programming sufficiency
+                    - **Edit Check Level - Tier 2**: Tests query text accuracy and programming sufficiency
+                    - **Edit Check Level - Tier 3**: Tests programming sufficiency only
+                    - **Form Level**: Testing Tier is captured but does not affect test case generation
                     """)
                 )
             )
@@ -283,6 +293,25 @@ def server(input, output, session):
                 f"{unique_forms}"
             ))
         
+        if 'Custom.TestingTier' in df.columns:
+            # Show Testing Tier breakdown by Classification
+            stats.append(ui.tags.hr())
+            stats.append(ui.tags.h5("Testing Tier Distribution:"))
+            
+            for classification in df['Custom.TestCaseClassification'].dropna().unique():
+                class_df = df[df['Custom.TestCaseClassification'] == classification]
+                tier_counts = class_df['Custom.TestingTier'].value_counts()
+                
+                if len(tier_counts) > 0:
+                    stats.append(ui.tags.p(ui.tags.strong(f"{classification}:")))
+                    for tier, count in tier_counts.items():
+                        if pd.notna(tier) and str(tier).strip():
+                            stats.append(ui.tags.p(
+                                f"  • {tier}: ",
+                                ui.tags.strong(f"{count:,}"),
+                                " items"
+                            ))
+        
         return ui.div(*stats)
     
     @output
@@ -336,63 +365,116 @@ def server(input, output, session):
                     'title': f"{form_name} - Form Review",
                     'form_name': form_name,
                     'classification': 'Form Level',
+                    'testing_tier': str(row.get('Custom.TestingTier', '')),
                     'description': strip_html_tags(row.get('Custom.FieldorEditCheckText', '')),
                     'area_path': str(row.get('Area Path', '')),
                     'state': str(row.get('State', 'Design')),
                     'steps': []
                 })
             
-            # Process Field Level items (group into Field Reviews test case)
+            # Process Field Level items (group by Testing Tier)
             field_level = form_data[form_data['Custom.TestCaseClassification'] == 'Field Level']
             if len(field_level) > 0:
-                steps = []
-                for idx, row in field_level.iterrows():
-                    field_name = str(row.get('Custom.FieldName', ''))
-                    field_text = strip_html_tags(row.get('Custom.FieldorEditCheckText', ''))
-                    steps.append({
-                        'step_number': len(steps) + 1,
-                        'action': f"Test field: {field_name}",
-                        'expected': f"Field '{field_name}' validates correctly. {field_text}",
-                        'field_name': field_name
+                # Group by Testing Tier
+                for testing_tier in field_level['Custom.TestingTier'].unique():
+                    tier_data = field_level[field_level['Custom.TestingTier'] == testing_tier]
+                    if len(tier_data) == 0:
+                        continue
+                    
+                    steps = []
+                    for idx, row in tier_data.iterrows():
+                        field_name = str(row.get('Custom.FieldName', ''))
+                        field_text = strip_html_tags(row.get('Custom.FieldorEditCheckText', ''))
+                        tier_value = str(row.get('Custom.TestingTier', '')).strip()
+                        
+                        # Determine expected result based on Testing Tier
+                        if tier_value == 'Tier 1':
+                            expected = "Correct variable name, label, SAS label, format, length, pick lists, value choices, calculation."
+                        elif tier_value == 'Tier 2':
+                            expected = "Correct variable format, length, pick lists, value choices, calculation."
+                        elif tier_value == 'Tier 3':
+                            expected = "Correct variable format, length, calculation."
+                        else:
+                            # Default if tier is not specified or unknown
+                            expected = f"Field '{field_name}' validates correctly. {field_text}"
+                        
+                        # Action format: "Review field: FieldName (FieldText)"
+                        action = f"Review field: {field_name}"
+                        if field_text:
+                            action += f" ({field_text})"
+                        
+                        steps.append({
+                            'step_number': len(steps) + 1,
+                            'action': action,
+                            'expected': expected,
+                            'field_name': field_name
+                        })
+                    
+                    first_row = tier_data.iloc[0]
+                    tier_label = f" - {testing_tier}" if pd.notna(testing_tier) and str(testing_tier).strip() else ""
+                    test_cases.append({
+                        'type': 'field_reviews',
+                        'title': f"{form_name} - Field Reviews{tier_label}",
+                        'form_name': form_name,
+                        'classification': 'Field Level',
+                        'testing_tier': str(first_row.get('Custom.TestingTier', '')),
+                        'description': f"Field-level validation for form {form_name}{tier_label}. Total fields: {len(steps)}",
+                        'area_path': str(first_row.get('Area Path', '')),
+                        'state': str(first_row.get('State', 'Design')),
+                        'steps': steps
                     })
-                
-                first_row = field_level.iloc[0]
-                test_cases.append({
-                    'type': 'field_reviews',
-                    'title': f"{form_name} - Field Reviews",
-                    'form_name': form_name,
-                    'classification': 'Field Level',
-                    'description': f"Field-level validation for form {form_name}. Total fields: {len(steps)}",
-                    'area_path': str(first_row.get('Area Path', '')),
-                    'state': str(first_row.get('State', 'Design')),
-                    'steps': steps
-                })
             
-            # Process Edit Check Level items (group into Edit Check Reviews test case)
+            # Process Edit Check Level items (group by Testing Tier)
             edit_check_level = form_data[form_data['Custom.TestCaseClassification'] == 'Edit Check Level']
             if len(edit_check_level) > 0:
-                steps = []
-                for idx, row in edit_check_level.iterrows():
-                    edit_check_name = str(row.get('Custom.EditCheckName', ''))
-                    edit_check_text = strip_html_tags(row.get('Custom.FieldorEditCheckText', ''))
-                    steps.append({
-                        'step_number': len(steps) + 1,
-                        'action': f"Test edit check: {edit_check_name}",
-                        'expected': f"Edit check '{edit_check_name}' functions correctly. {edit_check_text}",
-                        'edit_check_name': edit_check_name
+                # Group by Testing Tier
+                for testing_tier in edit_check_level['Custom.TestingTier'].unique():
+                    tier_data = edit_check_level[edit_check_level['Custom.TestingTier'] == testing_tier]
+                    if len(tier_data) == 0:
+                        continue
+                    
+                    steps = []
+                    for idx, row in tier_data.iterrows():
+                        edit_check_name = str(row.get('Custom.EditCheckName', ''))
+                        edit_check_text = strip_html_tags(row.get('Custom.FieldorEditCheckText', ''))
+                        tier_value = str(row.get('Custom.TestingTier', '')).strip()
+                        
+                        # Determine expected result based on Testing Tier
+                        if tier_value == 'Tier 1':
+                            expected = "Positive Test in System Passes, Negative Test in System passes, Range Checks (high / low) pass, Query Text is correct and accurate and not leading. Sufficient Edit Checks are programmed"
+                        elif tier_value == 'Tier 2':
+                            expected = "Query Text is correct and accurate and not leading. Sufficient Edit Checks are programmed"
+                        elif tier_value == 'Tier 3':
+                            expected = "Sufficient Edit Checks are programmed."
+                        else:
+                            # Default if tier is not specified or unknown
+                            expected = f"Edit check '{edit_check_name}' functions correctly. {edit_check_text}"
+                        
+                        # Action format: "Review field: EditCheckName (EditCheckText)"
+                        action = f"Review field: {edit_check_name}"
+                        if edit_check_text:
+                            action += f" ({edit_check_text})"
+                        
+                        steps.append({
+                            'step_number': len(steps) + 1,
+                            'action': action,
+                            'expected': expected,
+                            'edit_check_name': edit_check_name
+                        })
+                    
+                    first_row = tier_data.iloc[0]
+                    tier_label = f" - {testing_tier}" if pd.notna(testing_tier) and str(testing_tier).strip() else ""
+                    test_cases.append({
+                        'type': 'edit_check_reviews',
+                        'title': f"{form_name} - Edit Check Reviews{tier_label}",
+                        'form_name': form_name,
+                        'classification': 'Edit Check Level',
+                        'testing_tier': str(first_row.get('Custom.TestingTier', '')),
+                        'description': f"Edit check validation for form {form_name}{tier_label}. Total checks: {len(steps)}",
+                        'area_path': str(first_row.get('Area Path', '')),
+                        'state': str(first_row.get('State', 'Design')),
+                        'steps': steps
                     })
-                
-                first_row = edit_check_level.iloc[0]
-                test_cases.append({
-                    'type': 'edit_check_reviews',
-                    'title': f"{form_name} - Edit Check Reviews",
-                    'form_name': form_name,
-                    'classification': 'Edit Check Level',
-                    'description': f"Edit check validation for form {form_name}. Total checks: {len(steps)}",
-                    'area_path': str(first_row.get('Area Path', '')),
-                    'state': str(first_row.get('State', 'Design')),
-                    'steps': steps
-                })
         
         processed_test_cases.set(test_cases)
     
@@ -440,8 +522,8 @@ def server(input, output, session):
         
         type_names = {
             'standalone': '📄 Standalone (Form Level)',
-            'field_reviews': '🔍 Field Reviews',
-            'edit_check_reviews': '✅ Edit Check Reviews'
+            'field_reviews': '🔍 Field Reviews (grouped by tier)',
+            'edit_check_reviews': '✅ Edit Check Reviews (grouped by tier)'
         }
         
         for tc_type, count in type_counts.items():
@@ -461,7 +543,10 @@ def server(input, output, session):
             ui.tags.p(
                 "✅ Processed file ready! ",
                 ui.tags.br(),
-                "Click 'Download Processed CSV' to export this structure."
+                "Click 'Download Processed CSV' to export this structure.",
+                ui.tags.br(),
+                ui.tags.br(),
+                ui.tags.em("Note: Field Level and Edit Check Level test cases are grouped by Testing Tier, with tier-specific expected results.")
             ),
             class_="info-box"
         ))
@@ -501,14 +586,24 @@ def server(input, output, session):
                         ui.tags.em(f"... and {len(tc['steps']) - 3} more steps")
                     )
             
-            content = ui.div(
+            content_items = [
                 ui.tags.p(ui.tags.strong("Title: "), tc['title']),
                 ui.tags.p(ui.tags.strong("Type: "), tc['type'].replace('_', ' ').title()),
                 ui.tags.p(ui.tags.strong("Form: "), tc['form_name']),
+                ui.tags.p(ui.tags.strong("Classification: "), tc['classification'])
+            ]
+            
+            # Add Testing Tier if it exists
+            if tc.get('testing_tier'):
+                content_items.append(ui.tags.p(ui.tags.strong("Testing Tier: "), tc['testing_tier']))
+            
+            content_items.extend([
                 ui.tags.p(ui.tags.strong("Total Steps: "), str(len(tc['steps']))),
                 ui.tags.hr(),
                 step_info if tc['steps'] else ui.tags.em("No steps (standalone test case)")
-            )
+            ])
+            
+            content = ui.div(*content_items)
             
             panels.append(ui.accordion_panel(
                 f"Example {i+1}: {tc['title']}", 
@@ -563,7 +658,7 @@ def server(input, output, session):
                 'Custom.FieldName': '',
                 'Custom.FormName': tc['form_name'],
                 'Custom.TestCaseClassification': tc['classification'],
-                'Custom.TestingTier': '',
+                'Custom.TestingTier': tc.get('testing_tier', ''),
                 'Area Path': tc['area_path'] if tc['area_path'] else '',
                 'Assigned To': '',
                 'State': tc['state']
@@ -763,6 +858,9 @@ def server(input, output, session):
                     try:
                         work_item_data.append({"op": "add", "path": "/fields/Custom.TestCaseClassification", "value": tc['classification']})
                         work_item_data.append({"op": "add", "path": "/fields/Custom.FormName", "value": tc['form_name']})
+                        # Add Testing Tier only if it exists and has a value
+                        if tc.get('testing_tier'):
+                            work_item_data.append({"op": "add", "path": "/fields/Custom.TestingTier", "value": tc['testing_tier']})
                     except:
                         pass  # Custom fields may not exist in all projects
                     
