@@ -16,7 +16,7 @@ import re
 from datetime import datetime
 
 # Application version
-VERSION = "2.0.6"
+VERSION = "2.0.7"
 
 # Configuration
 BATCH_SIZE = 1000  # Maximum test cases per batch
@@ -350,10 +350,11 @@ def server(input, output, session):
             return
         
         test_cases = []
-        
+        forms_with_null_tiers = []  # Track forms with null Form level testing tiers
+
         # Group by Form Name
         unique_forms = df['Custom.FormName'].dropna().unique()
-        
+
         for form_name in unique_forms:
             form_data = df[df['Custom.FormName'] == form_name]
 
@@ -365,6 +366,9 @@ def server(input, output, session):
                 tier_value = first_form_level.get('Custom.TestingTier', '')
                 if pd.notna(tier_value) and str(tier_value).strip():
                     form_level_testing_tier = str(tier_value).strip()
+                else:
+                    # Track forms with null/empty Form level testing tiers
+                    forms_with_null_tiers.append(form_name)
 
 # Process Form Level items (standalone test cases)
             for _, row in form_level.iterrows():
@@ -451,14 +455,13 @@ def server(input, output, session):
                         })
                     
                     first_row = tier_data.iloc[0]
-                    tier_label = f" - {testing_tier}" if pd.notna(testing_tier) and str(testing_tier).strip() else ""
                     test_cases.append({
                         'type': 'field_reviews',
-                        'title': f"{form_name} - Field Reviews{tier_label}",
+                        'title': f"{form_name} - Field Reviews",
                         'form_name': form_name,
                         'classification': 'Field Level',
                         'testing_tier': str(first_row.get('Custom.TestingTier', '')),
-                        'description': f"Field-level validation for form {form_name}{tier_label}. Total fields: {len(steps)}",
+                        'description': f"Field-level validation for form {form_name}. Total fields: {len(steps)}",
                         'area_path': str(first_row.get('Area Path', '')),
                         'state': str(first_row.get('State', 'Design')),
                         'steps': steps
@@ -511,20 +514,24 @@ def server(input, output, session):
                         })
                     
                     first_row = tier_data.iloc[0]
-                    tier_label = f" - {testing_tier}" if pd.notna(testing_tier) and str(testing_tier).strip() else ""
                     test_cases.append({
                         'type': 'edit_check_reviews',
-                        'title': f"{form_name} - Edit Check Reviews{tier_label}",
+                        'title': f"{form_name} - Edit Check Reviews",
                         'form_name': form_name,
                         'classification': 'Edit Check Level',
                         'testing_tier': str(first_row.get('Custom.TestingTier', '')),
-                        'description': f"Edit check validation for form {form_name}{tier_label}. Total checks: {len(steps)}",
+                        'description': f"Edit check validation for form {form_name}. Total checks: {len(steps)}",
                         'area_path': str(first_row.get('Area Path', '')),
                         'state': str(first_row.get('State', 'Design')),
                         'steps': steps
                     })
-        
-        processed_test_cases.set(test_cases)
+
+        # Store test cases along with metadata about null Form level testing tiers
+        processed_data = {
+            'test_cases': test_cases,
+            'forms_with_null_tiers': forms_with_null_tiers
+        }
+        processed_test_cases.set(processed_data)
     
     # ========================================================================
     # TEST CASE DISPLAY
@@ -534,18 +541,18 @@ def server(input, output, session):
     @render.ui
     def test_cases_summary():
         """Show summary of processed test cases"""
-        test_cases = processed_test_cases.get()
-        if test_cases is None:
+        processed_data = processed_test_cases.get()
+        if processed_data is None:
             return ui.div(
-                ui.tags.p("⚠️ No test cases processed. Click 'Process CSV' first.", 
+                ui.tags.p("⚠️ No test cases processed. Click 'Process CSV' first.",
                          class_="text-warning")
             )
-        
+
         # Check for error state
-        if isinstance(test_cases, dict) and test_cases.get('error'):
+        if isinstance(processed_data, dict) and processed_data.get('error'):
             return ui.div(
                 ui.tags.h4("❌ Processing Error", class_="text-danger"),
-                ui.tags.p(test_cases.get('message', 'Unknown error occurred')),
+                ui.tags.p(processed_data.get('message', 'Unknown error occurred')),
                 ui.tags.hr(),
                 ui.tags.p("Please ensure your CSV file contains the following required columns:"),
                 ui.tags.ul(
@@ -554,7 +561,11 @@ def server(input, output, session):
                     ui.tags.li("Custom.FieldorEditCheckText")
                 )
             )
-        
+
+        # Extract test cases and null tier info from processed data
+        test_cases = processed_data.get('test_cases', [])
+        forms_with_null_tiers = processed_data.get('forms_with_null_tiers', [])
+
         type_counts = {}
         total_steps = 0
         for tc in test_cases:
@@ -587,6 +598,17 @@ def server(input, output, session):
         ))
         
         summary.append(ui.tags.hr())
+
+        # Add warning if there are forms with null Form level testing tiers
+        if forms_with_null_tiers:
+            summary.append(ui.tags.div(
+                ui.tags.h5("⚠️ Warning: Forms with Null Testing Tiers", class_="text-warning"),
+                ui.tags.p(f"The following {len(forms_with_null_tiers)} form(s) have null or empty Form Level Testing Tier values:"),
+                ui.tags.ul(*[ui.tags.li(form) for form in forms_with_null_tiers]),
+                ui.tags.p("Field Level and Edit Check Level items for these forms will not inherit a testing tier value."),
+                style="background-color: #fff3cd; padding: 10px; border-radius: 5px; color: #856404; margin-bottom: 15px;"
+            ))
+
         summary.append(ui.tags.div(
             ui.tags.p(
                 "✅ Processed file ready! ",
@@ -598,23 +620,25 @@ def server(input, output, session):
             ),
             class_="info-box"
         ))
-        
+
         return ui.div(*summary)
     
     @output
     @render.ui
     def test_cases_display():
         """Display sample test cases"""
-        test_cases = processed_test_cases.get()
-        if test_cases is None:
+        processed_data = processed_test_cases.get()
+        if processed_data is None:
             return ui.p("No test cases to display.")
-        
+
         # Check for error state
-        if isinstance(test_cases, dict) and test_cases.get('error'):
+        if isinstance(processed_data, dict) and processed_data.get('error'):
             return ui.div(
                 ui.tags.p("Cannot display test cases due to processing error.", class_="text-danger")
             )
-        
+
+        # Extract test cases from processed data
+        test_cases = processed_data.get('test_cases', [])
         display_cases = test_cases[:5]
         panels = []
         
@@ -673,26 +697,29 @@ def server(input, output, session):
     @render.download(filename=lambda: f"processed_test_cases_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
     def download_processed():
         """Download processed test cases as CSV in Azure DevOps format"""
-        test_cases = processed_test_cases.get()
-        
-        if test_cases is None:
+        processed_data = processed_test_cases.get()
+
+        if processed_data is None:
             # Return empty CSV with message
             df = pd.DataFrame({"Message": ["No processed test cases available. Please process CSV first."]})
             yield df.to_csv(index=False, na_rep='')
             return
-        
+
         # Check for error state
-        if isinstance(test_cases, dict) and test_cases.get('error'):
+        if isinstance(processed_data, dict) and processed_data.get('error'):
             # Return CSV with error message
-            df = pd.DataFrame({"Error": [test_cases.get('message', 'Unknown error occurred')]})
+            df = pd.DataFrame({"Error": [processed_data.get('message', 'Unknown error occurred')]})
             yield df.to_csv(index=False, na_rep='')
             return
-        
+
+        # Extract test cases from processed data
+        test_cases = processed_data.get('test_cases', [])
+
         # Convert test cases to Azure DevOps hierarchical format
         # Each test case = 1 header row + N step rows
         # IMPORTANT: Column order must match exactly as specified
         rows = []
-        
+
         for tc in test_cases:
             # Add test case header row (metadata only, steps empty)
             header_row = {
@@ -817,30 +844,33 @@ def server(input, output, session):
     @reactive.event(input.upload_btn)
     async def upload_to_devops():
         """Upload test cases to Azure DevOps"""
-        test_cases = processed_test_cases.get()
+        processed_data = processed_test_cases.get()
         organization = input.organization()
         project = input.project()
         pat_token = input.pat_token()
         dry_run = input.dry_run()
-        
-        if not all([test_cases, organization, project, pat_token]):
+
+        if not all([processed_data, organization, project, pat_token]):
             upload_progress_info.set({
                 'status': 'error',
                 'message': 'Missing required configuration. Please fill all fields.'
             })
             return
-        
+
         # Check for error state in processed test cases
-        if isinstance(test_cases, dict) and test_cases.get('error'):
+        if isinstance(processed_data, dict) and processed_data.get('error'):
             upload_progress_info.set({
                 'status': 'error',
-                'message': f"Cannot upload: {test_cases.get('message', 'Unknown error in test cases')}"
+                'message': f"Cannot upload: {processed_data.get('message', 'Unknown error in test cases')}"
             })
             return
-        
+
+        # Extract test cases from processed data
+        test_cases = processed_data.get('test_cases', [])
+
         base_url = f"https://dev.azure.com/{organization}/{project}/_apis"
         headers = create_auth_header(pat_token)
-        
+
         total = len(test_cases)
         all_results = []
         
