@@ -16,7 +16,7 @@ import re
 from datetime import datetime
 
 # Application version
-VERSION = "2.0.5"
+VERSION = "2.0.6"
 
 # Configuration
 BATCH_SIZE = 1000  # Maximum test cases per batch
@@ -356,9 +356,17 @@ def server(input, output, session):
         
         for form_name in unique_forms:
             form_data = df[df['Custom.FormName'] == form_name]
-            
-# Process Form Level items (standalone test cases)
+
+            # Get form level testing tier if it exists (for inheritance by Field/Edit Check levels)
+            form_level_testing_tier = ''
             form_level = form_data[form_data['Custom.TestCaseClassification'] == 'Form Level']
+            if len(form_level) > 0:
+                first_form_level = form_level.iloc[0]
+                tier_value = first_form_level.get('Custom.TestingTier', '')
+                if pd.notna(tier_value) and str(tier_value).strip():
+                    form_level_testing_tier = str(tier_value).strip()
+
+# Process Form Level items (standalone test cases)
             for _, row in form_level.iterrows():
                 # Define standard Form Level test steps
                 form_level_steps = [
@@ -399,7 +407,15 @@ def server(input, output, session):
             # Process Field Level items (group by Testing Tier)
             field_level = form_data[form_data['Custom.TestCaseClassification'] == 'Field Level']
             if len(field_level) > 0:
-                # Group by Testing Tier
+                # Create a copy and apply inheritance from form level testing tier
+                field_level = field_level.copy()
+                if form_level_testing_tier:
+                    # Fill empty/missing testing tier values with form level tier
+                    field_level['Custom.TestingTier'] = field_level['Custom.TestingTier'].apply(
+                        lambda x: form_level_testing_tier if pd.isna(x) or not str(x).strip() else x
+                    )
+
+                # Group by Testing Tier (now with inherited values)
                 for testing_tier in field_level['Custom.TestingTier'].unique():
                     tier_data = field_level[field_level['Custom.TestingTier'] == testing_tier]
                     if len(tier_data) == 0:
@@ -451,7 +467,15 @@ def server(input, output, session):
             # Process Edit Check Level items (group by Testing Tier)
             edit_check_level = form_data[form_data['Custom.TestCaseClassification'] == 'Edit Check Level']
             if len(edit_check_level) > 0:
-                # Group by Testing Tier
+                # Create a copy and apply inheritance from form level testing tier
+                edit_check_level = edit_check_level.copy()
+                if form_level_testing_tier:
+                    # Fill empty/missing testing tier values with form level tier
+                    edit_check_level['Custom.TestingTier'] = edit_check_level['Custom.TestingTier'].apply(
+                        lambda x: form_level_testing_tier if pd.isna(x) or not str(x).strip() else x
+                    )
+
+                # Group by Testing Tier (now with inherited values)
                 for testing_tier in edit_check_level['Custom.TestingTier'].unique():
                     tier_data = edit_check_level[edit_check_level['Custom.TestingTier'] == testing_tier]
                     if len(tier_data) == 0:
